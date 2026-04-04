@@ -2,6 +2,7 @@
 """Gemini Live session logic for push-to-talk wrapper."""
 
 import asyncio
+import struct
 import sys
 from collections.abc import Callable
 
@@ -10,11 +11,39 @@ from google.genai import types
 
 import app_config as cfg
 
+try:
+    import audioop
+except ImportError:
+    audioop = None
+
 
 class LedMode:
     IDLE = "idle"
     RECORDING = "recording"
     SPEAKING = "speaking"
+
+
+def _pcm16le_rms(chunk: bytes) -> int:
+    """Compute RMS for signed 16-bit little-endian PCM without audioop."""
+    sample_bytes = len(chunk) - (len(chunk) % 2)
+    if sample_bytes <= 0:
+        return 0
+
+    total = 0
+    sample_count = 0
+    for (sample,) in struct.iter_unpack("<h", chunk[:sample_bytes]):
+        total += sample * sample
+        sample_count += 1
+
+    if sample_count == 0:
+        return 0
+    return int((total / sample_count) ** 0.5)
+
+
+def _chunk_rms(chunk: bytes) -> int:
+    if audioop is not None:
+        return audioop.rms(chunk, 2)
+    return _pcm16le_rms(chunk)
 
 
 def require_api_key() -> None:
@@ -39,6 +68,10 @@ async def run_gemini_session(
     pressed_evt: asyncio.Event,
     released_evt: asyncio.Event,
     set_led_mode: Callable[[str], None],
+    auto_stop_on_silence: bool = False,
+    silence_timeout_seconds: float = 1.0,
+    speech_rms_threshold: int = 450,
+    max_record_seconds: float | None = None,
 ) -> None:
     """Run Gemini Live send/receive loop controlled by external button events."""
     require_api_key()
@@ -115,9 +148,10 @@ async def run_gemini_session(
 
         try:
             while True:
-                pressed_evt.clear()
                 released_evt.clear()
-                await pressed_evt.wait()
+                if not pressed_evt.is_set():
+                    await pressed_evt.wait()
+                pressed_evt.clear()
 
                 set_led_mode(LedMode.RECORDING)
                 await session.send_realtime_input(activity_start=types.ActivityStart())
@@ -145,10 +179,17 @@ async def run_gemini_session(
 
                 # Stream chunks to Gemini as they are captured to minimize latency.
                 sent_audio_chunks = 0
+                loop = asyncio.get_running_loop()
+                turn_started = loop.time()
+                last_voice_ts = turn_started
+                heard_voice = False
                 while not released_evt.is_set():
                     try:
                         chunk = await asyncio.wait_for(rec.stdout.read(cfg.CHUNK), timeout=0.1)
                     except asyncio.TimeoutError:
+                        if auto_stop_on_silence and max_record_seconds is not None:
+                            if loop.time() - turn_started >= max_record_seconds:
+                                released_evt.set()
                         continue
 
                     if not chunk:
@@ -161,6 +202,18 @@ async def run_gemini_session(
                             audio=types.Blob(data=chunk, mime_type=cfg.AUDIO_MIME)
                         )
                         sent_audio_chunks += 1
+                        if auto_stop_on_silence:
+                            now = loop.time()
+                            if max_record_seconds is not None and now - turn_started >= max_record_seconds:
+                                released_evt.set()
+                                break
+                            # Simple RMS VAD over 16-bit PCM chunks.
+                            if _chunk_rms(chunk) >= speech_rms_threshold:
+                                heard_voice = True
+                                last_voice_ts = now
+                            elif heard_voice and now - last_voice_ts >= silence_timeout_seconds:
+                                released_evt.set()
+                                break
                     except Exception:
                         break
 
@@ -190,6 +243,9 @@ async def run_gemini_session(
                             "\n⚠️ Button was released before audio frame capture."
                         )
                     print("\n⚠️ No microphone audio captured during button hold.")
+
+                if auto_stop_on_silence and not released_evt.is_set():
+                    released_evt.set()
 
                 await session.send_realtime_input(activity_end=types.ActivityEnd())
                 set_led_mode(LedMode.IDLE)

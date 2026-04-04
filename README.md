@@ -4,6 +4,7 @@ It should work with almost any ALSA-compatible microphone/speaker setup, not onl
 
 ## Repository Contents
 - `push-to-talk.py` - wrapper with GPIO button/LED functions and app entrypoint.
+- `wake-word.py` - wake-word entrypoint (keyword starts voice-activity-based recording turn).
 - `gemini-on-voicehat.py` - Gemini Live session/audio streaming logic used by `push-to-talk.py`.
 - `app_config.py` - loads and validates app settings from `config.json`.
 - `config.json` - main configuration file (API key, GPIO, audio, Gemini, debug).
@@ -16,6 +17,10 @@ It should work with almost any ALSA-compatible microphone/speaker setup, not onl
 - Python packages:
   - `google-genai`
   - `gpiozero`
+  - `vosk` (only for `wake-word.py`)
+
+Install Python dependencies:
+- `pip install google-genai gpiozero vosk`
 
 ## Quick Start (`push-to-talk.py`)
 1. Open `config.json` and set:
@@ -29,8 +34,34 @@ It should work with almost any ALSA-compatible microphone/speaker setup, not onl
 
 After startup, hold the button to record; when released, the model response is played through the speaker.
 
+## Wake-Word Mode (`wake-word.py`)
+1. Install wake-word dependency:
+   - `pip install vosk`
+2. Download a Vosk model from official model list:
+   - [Vosk Models (official)](https://alphacephei.com/vosk/models)
+   - Recommended on Raspberry Pi: `vosk-model-small-en-us-0.15`
+   - Example:
+     - `wget https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip`
+     - `unzip vosk-model-small-en-us-0.15.zip`
+3. Set `wake_word.vosk_model_path` in `config.json` to the extracted model directory (not the `.zip` file), for example:
+   - `vosk-model-small-en-us-0.15`
+4. Set `wake_word.keyword` in `config.json`.
+5. (Optional) tune VAD:
+   - `wake_word.silence_timeout_seconds`
+   - `wake_word.speech_rms_threshold`
+   - `wake_word.max_record_seconds`
+6. Run:
+   - `python3 wake-word.py`
+
+Behavior:
+- App waits for keyword using microphone input.
+- LED pulses very slowly while waiting for keyword.
+- After keyword detection, it records while voice is present and ends after silence (`wake_word.silence_timeout_seconds`).
+- `wake_word.max_record_seconds` is a safety cap to prevent endless recording.
+
 ## Configuration
 All settings are centralized in `config.json` and loaded by `app_config.py`.
 
 - Edit sections: `api`, `gpio`, `audio`, `gemini`, `debug`.
+- Wake mode settings are in section: `wake_word`.
 - Keep `config.json` private if it contains a real API key.

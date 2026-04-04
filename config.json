@@ -22,5 +22,15 @@
   "debug": {
     "print_transcript": true,
     "print_audio_stats": true
+  },
+  "wake_word": {
+    "keyword": "gemini",
+    "vosk_model_path": "vosk-model-small-en-us-0.15",
+    "listen_rate": 16000,
+    "listen_chunk": 4000,
+    "silence_timeout_seconds": 1.0,
+    "speech_rms_threshold": 450,
+    "max_record_seconds": 12.0,
+    "wait_pulse_seconds": 1.2
   }
 }

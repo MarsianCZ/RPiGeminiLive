@@ -26,12 +26,22 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "gemini": {
         "model": "gemini-2.5-flash-native-audio-preview-12-2025",
-        "system_instruction": "Speak Czech. Respond briefly and concisely.",
+        "system_instruction": "Respond briefly and concisely.",
         "voice_name": "Kore",
     },
     "debug": {
         "print_transcript": True,
         "print_audio_stats": True,
+    },
+    "wake_word": {
+        "keyword": "gemini",
+        "vosk_model_path": "vosk-model-small-en-us-0.15",
+        "listen_rate": 16000,
+        "listen_chunk": 4000,
+        "silence_timeout_seconds": 1.0,
+        "speech_rms_threshold": 450,
+        "max_record_seconds": 12.0,
+        "wait_pulse_seconds": 1.2,
     },
 }
 
@@ -118,6 +128,16 @@ VOICE_NAME = str(_CFG["gemini"]["voice_name"]).strip()
 # --- Debug / console ---
 PRINT_TRANSCRIPT = bool(_CFG["debug"]["print_transcript"])
 PRINT_AUDIO_STATS = bool(_CFG["debug"]["print_audio_stats"])
+
+# --- Wake-word mode ---
+WAKE_KEYWORD = str(_CFG["wake_word"]["keyword"]).strip().lower()
+WAKE_VOSK_MODEL_PATH = str(_CFG["wake_word"]["vosk_model_path"]).strip()
+WAKE_LISTEN_RATE = int(_CFG["wake_word"]["listen_rate"])
+WAKE_LISTEN_CHUNK = int(_CFG["wake_word"]["listen_chunk"])
+WAKE_SILENCE_TIMEOUT_SECONDS = float(_CFG["wake_word"]["silence_timeout_seconds"])
+WAKE_SPEECH_RMS_THRESHOLD = int(_CFG["wake_word"]["speech_rms_threshold"])
+WAKE_MAX_RECORD_SECONDS = float(_CFG["wake_word"]["max_record_seconds"])
+WAKE_WAIT_PULSE_SECONDS = float(_CFG["wake_word"]["wait_pulse_seconds"])
 
 GEMINI_CONFIG = {
     "response_modalities": ["AUDIO"],
