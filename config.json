@@ -1,0 +1,26 @@
+{
+  "api": {
+    "api_key": "PUT_YOUR_GEMINI_API_KEY_HERE"
+  },
+  "gpio": {
+    "button_gpio": 23,
+    "led_gpio": 25,
+    "button_bounce_sec": 0.03
+  },
+  "audio": {
+    "send_rate": 16000,
+    "recv_rate": 24000,
+    "chunk": 2048,
+    "alsa_in_dev": "default",
+    "alsa_out_dev": "default"
+  },
+  "gemini": {
+    "model": "gemini-2.5-flash-native-audio-preview-12-2025",
+    "system_instruction": "Respond briefly and concisely.",
+    "voice_name": "Kore"
+  },
+  "debug": {
+    "print_transcript": true,
+    "print_audio_stats": true
+  }
+}
