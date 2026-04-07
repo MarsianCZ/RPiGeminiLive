@@ -7,7 +7,7 @@ It should work with almost any ALSA-compatible microphone/speaker setup, not onl
 - `wake-word.py` - wake-word entrypoint (keyword starts voice-activity-based recording turn).
 - `gemini-on-voicehat.py` - Gemini Live session/audio streaming logic used by `push-to-talk.py`.
 - `app_config.py` - loads and validates app settings from `config.json`.
-- `config.json` - main configuration file (API key, GPIO, audio, Gemini, debug).
+- `config.json` - main configuration file (API key, GPIO, LED behavior, audio, Gemini, debug).
 
 ## Requirements
 - Raspberry Pi (tested with AIY Voice HAT).
@@ -62,6 +62,6 @@ Behavior:
 ## Configuration
 All settings are centralized in `config.json` and loaded by `app_config.py`.
 
-- Edit sections: `api`, `gpio`, `audio`, `gemini`, `debug`.
+- Edit sections: `api`, `gpio`, `led`, `audio`, `gemini`, `debug`.
 - Wake mode settings are in section: `wake_word`.
 - Keep `config.json` private if it contains a real API key.

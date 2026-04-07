@@ -7,6 +7,14 @@
     "led_gpio": 25,
     "button_bounce_sec": 0.03
   },
+  "led": {
+    "speaking_fade_in_seconds": 0.35,
+    "speaking_fade_out_seconds": 0.35,
+    "error_blink_on_seconds": 0.08,
+    "error_blink_off_seconds": 0.08,
+    "error_blink_count": 6,
+    "wake_wait_pulse_seconds": 1.2
+  },
   "audio": {
     "send_rate": 16000,
     "recv_rate": 24000,
@@ -30,7 +38,6 @@
     "listen_chunk": 4000,
     "silence_timeout_seconds": 1.0,
     "speech_rms_threshold": 450,
-    "max_record_seconds": 12.0,
-    "wait_pulse_seconds": 1.2
+    "max_record_seconds": 12.0
   }
 }

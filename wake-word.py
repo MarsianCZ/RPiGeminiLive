@@ -65,13 +65,22 @@ class LedController:
         if self.current_mode == LedMode.RECORDING:
             self.led.value = 1
         elif self.current_mode == LedMode.SPEAKING:
-            self.led.pulse(fade_in_time=0.35, fade_out_time=0.35, background=True)
+            self.led.pulse(
+                fade_in_time=cfg.LED_SPEAKING_FADE_IN_SECONDS,
+                fade_out_time=cfg.LED_SPEAKING_FADE_OUT_SECONDS,
+                background=True,
+            )
         elif self.current_mode == LedMode.ERROR:
-            self.led.blink(on_time=0.08, off_time=0.08, n=6, background=True)
+            self.led.blink(
+                on_time=cfg.LED_ERROR_BLINK_ON_SECONDS,
+                off_time=cfg.LED_ERROR_BLINK_OFF_SECONDS,
+                n=cfg.LED_ERROR_BLINK_COUNT,
+                background=True,
+            )
         elif self.waiting_for_wake:
             self.led.pulse(
-                fade_in_time=cfg.WAKE_WAIT_PULSE_SECONDS,
-                fade_out_time=cfg.WAKE_WAIT_PULSE_SECONDS,
+                fade_in_time=cfg.LED_WAKE_WAIT_PULSE_SECONDS,
+                fade_out_time=cfg.LED_WAKE_WAIT_PULSE_SECONDS,
                 background=True,
             )
         else:

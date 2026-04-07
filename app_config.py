@@ -17,6 +17,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "led_gpio": 25,
         "button_bounce_sec": 0.03,
     },
+    "led": {
+        "speaking_fade_in_seconds": 0.35,
+        "speaking_fade_out_seconds": 0.35,
+        "error_blink_on_seconds": 0.08,
+        "error_blink_off_seconds": 0.08,
+        "error_blink_count": 6,
+        "wake_wait_pulse_seconds": 1.2,
+    },
     "audio": {
         "send_rate": 16000,
         "recv_rate": 24000,
@@ -41,7 +49,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "silence_timeout_seconds": 1.0,
         "speech_rms_threshold": 450,
         "max_record_seconds": 12.0,
-        "wait_pulse_seconds": 1.2,
     },
 }
 
@@ -56,7 +63,7 @@ def _merge_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return merged
 
 
-def _load_file_config() -> dict[str, Any]:
+def _read_file_config() -> dict[str, Any]:
     if not CONFIG_PATH.exists():
         raise RuntimeError(
             f"Missing configuration file: {CONFIG_PATH}. "
@@ -68,10 +75,11 @@ def _load_file_config() -> dict[str, Any]:
         raise RuntimeError(f"Invalid JSON in {CONFIG_PATH}: {exc}") from exc
     if not isinstance(loaded, dict):
         raise RuntimeError(f"Top-level JSON object expected in {CONFIG_PATH}.")
-    return _merge_dict(DEFAULT_CONFIG, loaded)
+    return loaded
 
 
-_CFG = _load_file_config()
+_FILE_CFG = _read_file_config()
+_CFG = _merge_dict(DEFAULT_CONFIG, _FILE_CFG)
 
 # --- API ---
 API_KEY = str(_CFG["api"]["api_key"]).strip()
@@ -80,6 +88,24 @@ API_KEY = str(_CFG["api"]["api_key"]).strip()
 BTN_GPIO = int(_CFG["gpio"]["button_gpio"])
 LED_GPIO = int(_CFG["gpio"]["led_gpio"])
 BTN_BOUNCE_SEC = float(_CFG["gpio"]["button_bounce_sec"])
+
+# --- LED behavior ---
+_raw_led_cfg = _FILE_CFG.get("led") if isinstance(_FILE_CFG.get("led"), dict) else {}
+_raw_wake_cfg = (
+    _FILE_CFG.get("wake_word") if isinstance(_FILE_CFG.get("wake_word"), dict) else {}
+)
+LED_SPEAKING_FADE_IN_SECONDS = float(_CFG["led"]["speaking_fade_in_seconds"])
+LED_SPEAKING_FADE_OUT_SECONDS = float(_CFG["led"]["speaking_fade_out_seconds"])
+LED_ERROR_BLINK_ON_SECONDS = float(_CFG["led"]["error_blink_on_seconds"])
+LED_ERROR_BLINK_OFF_SECONDS = float(_CFG["led"]["error_blink_off_seconds"])
+LED_ERROR_BLINK_COUNT = int(_CFG["led"]["error_blink_count"])
+if "wake_wait_pulse_seconds" in _raw_led_cfg:
+    LED_WAKE_WAIT_PULSE_SECONDS = float(_raw_led_cfg["wake_wait_pulse_seconds"])
+elif "wait_pulse_seconds" in _raw_wake_cfg:
+    # Backward compatibility for old configs.
+    LED_WAKE_WAIT_PULSE_SECONDS = float(_raw_wake_cfg["wait_pulse_seconds"])
+else:
+    LED_WAKE_WAIT_PULSE_SECONDS = float(_CFG["led"]["wake_wait_pulse_seconds"])
 
 # --- Audio ---
 SEND_RATE = int(_CFG["audio"]["send_rate"])
@@ -137,7 +163,6 @@ WAKE_LISTEN_CHUNK = int(_CFG["wake_word"]["listen_chunk"])
 WAKE_SILENCE_TIMEOUT_SECONDS = float(_CFG["wake_word"]["silence_timeout_seconds"])
 WAKE_SPEECH_RMS_THRESHOLD = int(_CFG["wake_word"]["speech_rms_threshold"])
 WAKE_MAX_RECORD_SECONDS = float(_CFG["wake_word"]["max_record_seconds"])
-WAKE_WAIT_PULSE_SECONDS = float(_CFG["wake_word"]["wait_pulse_seconds"])
 
 GEMINI_CONFIG = {
     "response_modalities": ["AUDIO"],
