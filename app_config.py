@@ -50,6 +50,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "speech_rms_threshold": 450,
         "max_record_seconds": 12.0,
     },
+    "button_wake_word": {
+        "followup_listen_seconds": 4.0,
+    },
 }
 
 
@@ -163,6 +166,11 @@ WAKE_LISTEN_CHUNK = int(_CFG["wake_word"]["listen_chunk"])
 WAKE_SILENCE_TIMEOUT_SECONDS = float(_CFG["wake_word"]["silence_timeout_seconds"])
 WAKE_SPEECH_RMS_THRESHOLD = int(_CFG["wake_word"]["speech_rms_threshold"])
 WAKE_MAX_RECORD_SECONDS = float(_CFG["wake_word"]["max_record_seconds"])
+
+# --- Button + wake-word conversation mode ---
+BUTTON_WAKE_FOLLOWUP_LISTEN_SECONDS = float(
+    _CFG["button_wake_word"]["followup_listen_seconds"]
+)
 
 GEMINI_CONFIG = {
     "response_modalities": ["AUDIO"],

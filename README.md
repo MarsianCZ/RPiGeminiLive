@@ -5,7 +5,8 @@ It should work with almost any ALSA-compatible microphone/speaker setup, not onl
 ## Repository Contents
 - `push-to-talk.py` - wrapper with GPIO button/LED functions and app entrypoint.
 - `wake-word.py` - wake-word entrypoint (keyword starts voice-activity-based recording turn).
-- `gemini-on-voicehat.py` - Gemini Live session/audio streaming logic used by `push-to-talk.py`.
+- `button-wake-word.py` - button-gated wake-word mode with short follow-up conversation loop.
+- `gemini-on-voicehat.py` - shared Gemini Live session/audio streaming logic used by all modes.
 - `app_config.py` - loads and validates app settings from `config.json`.
 - `config.json` - main configuration file (API key, GPIO, LED behavior, audio, Gemini, debug).
 
@@ -17,7 +18,7 @@ It should work with almost any ALSA-compatible microphone/speaker setup, not onl
 - Python packages:
   - `google-genai`
   - `gpiozero`
-  - `vosk` (only for `wake-word.py`)
+  - `vosk` (for `wake-word.py` and `button-wake-word.py`)
 
 Install Python dependencies:
 - `pip install google-genai gpiozero vosk`
@@ -59,9 +60,24 @@ Behavior:
 - After keyword detection, it records while voice is present and ends after silence (`wake_word.silence_timeout_seconds`).
 - `wake_word.max_record_seconds` is a safety cap to prevent endless recording.
 
+## Button + Wake-Word Mode (`button-wake-word.py`)
+Run:
+- `python3 button-wake-word.py`
+
+Behavior:
+- App waits for button press.
+- After button press, app waits for wake keyword.
+- After keyword detection, app records your prompt and plays model response.
+- Then app automatically opens a short follow-up listening window and continues the conversation turn-by-turn.
+- If no follow-up speech is detected in that window, it exits conversation flow and waits for button press again.
+
+Tune follow-up window:
+- `button_wake_word.followup_listen_seconds` (default `4.0`)
+
 ## Configuration
 All settings are centralized in `config.json` and loaded by `app_config.py`.
 
 - Edit sections: `api`, `gpio`, `led`, `audio`, `gemini`, `debug`.
 - Wake mode settings are in section: `wake_word`.
+- Button + wake mode settings are in section: `button_wake_word`.
 - Keep `config.json` private if it contains a real API key.

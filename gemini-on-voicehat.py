@@ -5,6 +5,7 @@ import asyncio
 import struct
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from google import genai
 from google.genai import types
@@ -21,6 +22,14 @@ class LedMode:
     IDLE = "idle"
     RECORDING = "recording"
     SPEAKING = "speaking"
+
+
+@dataclass(frozen=True)
+class TurnConfig:
+    auto_stop_on_silence: bool
+    silence_timeout_seconds: float
+    speech_rms_threshold: int
+    max_record_seconds: float | None
 
 
 def _pcm16le_rms(chunk: bytes) -> int:
@@ -72,6 +81,10 @@ async def run_gemini_session(
     silence_timeout_seconds: float = 1.0,
     speech_rms_threshold: int = 450,
     max_record_seconds: float | None = None,
+    turn_config_provider: Callable[[], TurnConfig] | None = None,
+    on_turn_recorded: Callable[[bool], None] | None = None,
+    on_response_finished: Callable[[bool], None] | None = None,
+    ready_hint: str | None = None,
 ) -> None:
     """Run Gemini Live send/receive loop controlled by external button events."""
     require_api_key()
@@ -90,8 +103,18 @@ async def run_gemini_session(
             pass
         player = await spawn_player()
 
+    async def _call_optional(callback, *args):
+        if callback is None:
+            return
+        result = callback(*args)
+        if asyncio.iscoroutine(result):
+            await result
+
     async with client.aio.live.connect(model=cfg.MODEL, config=cfg.GEMINI_CONFIG) as session:
-        print("✅ Connected. Hold the button to record (PTT). Ctrl+C to exit.")
+        if ready_hint:
+            print(f"✅ Connected. {ready_hint}")
+        else:
+            print("✅ Connected. Ctrl+C to exit.")
         print(f"   Model: {cfg.MODEL}")
         print(f"   ALSA IN : {cfg.ALSA_IN_DEV}")
         print(f"   ALSA OUT: {cfg.ALSA_OUT_DEV}")
@@ -144,10 +167,23 @@ async def run_gemini_session(
                 elif cfg.PRINT_AUDIO_STATS:
                     print("\n⚠️ No audio received in this turn.")
 
+                await _call_optional(on_response_finished, had_audio)
+
         recv_task = asyncio.create_task(receiver_loop())
 
         try:
             while True:
+                turn_cfg = (
+                    turn_config_provider()
+                    if turn_config_provider is not None
+                    else TurnConfig(
+                        auto_stop_on_silence=auto_stop_on_silence,
+                        silence_timeout_seconds=silence_timeout_seconds,
+                        speech_rms_threshold=speech_rms_threshold,
+                        max_record_seconds=max_record_seconds,
+                    )
+                )
+
                 released_evt.clear()
                 if not pressed_evt.is_set():
                     await pressed_evt.wait()
@@ -183,12 +219,15 @@ async def run_gemini_session(
                 turn_started = loop.time()
                 last_voice_ts = turn_started
                 heard_voice = False
+                track_voice_activity = (
+                    turn_cfg.auto_stop_on_silence or on_turn_recorded is not None
+                )
                 while not released_evt.is_set():
                     try:
                         chunk = await asyncio.wait_for(rec.stdout.read(cfg.CHUNK), timeout=0.1)
                     except asyncio.TimeoutError:
-                        if auto_stop_on_silence and max_record_seconds is not None:
-                            if loop.time() - turn_started >= max_record_seconds:
+                        if turn_cfg.auto_stop_on_silence and turn_cfg.max_record_seconds is not None:
+                            if loop.time() - turn_started >= turn_cfg.max_record_seconds:
                                 released_evt.set()
                         continue
 
@@ -202,16 +241,25 @@ async def run_gemini_session(
                             audio=types.Blob(data=chunk, mime_type=cfg.AUDIO_MIME)
                         )
                         sent_audio_chunks += 1
-                        if auto_stop_on_silence:
+                        if track_voice_activity:
                             now = loop.time()
-                            if max_record_seconds is not None and now - turn_started >= max_record_seconds:
-                                released_evt.set()
-                                break
                             # Simple RMS VAD over 16-bit PCM chunks.
-                            if _chunk_rms(chunk) >= speech_rms_threshold:
+                            if _chunk_rms(chunk) >= turn_cfg.speech_rms_threshold:
                                 heard_voice = True
                                 last_voice_ts = now
-                            elif heard_voice and now - last_voice_ts >= silence_timeout_seconds:
+                            elif (
+                                turn_cfg.auto_stop_on_silence
+                                and heard_voice
+                                and now - last_voice_ts >= turn_cfg.silence_timeout_seconds
+                            ):
+                                released_evt.set()
+                                break
+
+                            if (
+                                turn_cfg.auto_stop_on_silence
+                                and turn_cfg.max_record_seconds is not None
+                                and now - turn_started >= turn_cfg.max_record_seconds
+                            ):
                                 released_evt.set()
                                 break
                     except Exception:
@@ -244,11 +292,12 @@ async def run_gemini_session(
                         )
                     print("\n⚠️ No microphone audio captured during button hold.")
 
-                if auto_stop_on_silence and not released_evt.is_set():
+                if turn_cfg.auto_stop_on_silence and not released_evt.is_set():
                     released_evt.set()
 
                 await session.send_realtime_input(activity_end=types.ActivityEnd())
                 set_led_mode(LedMode.IDLE)
+                await _call_optional(on_turn_recorded, heard_voice)
 
         except asyncio.CancelledError:
             pass

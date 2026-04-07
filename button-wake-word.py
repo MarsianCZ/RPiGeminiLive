@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Wake-word entrypoint: listens for keyword, then records a timed message turn."""
+"""Button-gated wake-word mode with short follow-up conversation window."""
 
 import asyncio
 import importlib.util
@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from gpiozero import PWMLED
+from gpiozero import Button, PWMLED
 
 import app_config as cfg
 
@@ -18,17 +18,17 @@ except ImportError:
     Model = None
 
 
-def _load_run_gemini_session():
+def _load_gemini_exports():
     module_path = Path(__file__).with_name("gemini-on-voicehat.py")
     spec = importlib.util.spec_from_file_location("gemini_on_voicehat", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Cannot load Gemini module from {module_path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.run_gemini_session
+    return module.run_gemini_session, module.TurnConfig
 
 
-run_gemini_session = _load_run_gemini_session()
+run_gemini_session, TurnConfig = _load_gemini_exports()
 
 
 class LedMode:
@@ -39,7 +39,7 @@ class LedMode:
 
 
 class LedController:
-    """LED behavior for wake mode.
+    """LED behavior for button + wake mode.
 
     - waiting_for_wake=True + IDLE: very slow pulse
     - RECORDING: solid on
@@ -87,8 +87,27 @@ class LedController:
             self.led.value = 0
 
 
+class ConversationState:
+    def __init__(self):
+        self.phase = "initial"
+        self.last_turn_had_speech = False
+        self.last_response_had_audio = False
+        self.response_done_evt = asyncio.Event()
+
+
 def _contains_keyword(text: str, keyword: str) -> bool:
     return keyword in text.strip().lower()
+
+
+def _bind_button_press(
+    btn: Button,
+    loop: asyncio.AbstractEventLoop,
+    button_pressed_evt: asyncio.Event,
+) -> None:
+    def on_press():
+        loop.call_soon_threadsafe(button_pressed_evt.set)
+
+    btn.when_pressed = on_press
 
 
 async def _wait_for_wake_keyword(vosk_model: Model, keyword: str) -> None:
@@ -145,33 +164,56 @@ async def _wait_for_wake_keyword(vosk_model: Model, keyword: str) -> None:
             pass
 
 
-async def _wake_loop(
+async def _controller_loop(
+    button_pressed_evt: asyncio.Event,
     pressed_evt: asyncio.Event,
     released_evt: asyncio.Event,
     led: LedController,
     vosk_model: Model,
+    state: ConversationState,
 ) -> None:
     if not cfg.WAKE_KEYWORD:
         raise RuntimeError("wake_word.keyword is empty in config.json")
 
     while True:
+        print("Waiting for button press...")
+        button_pressed_evt.clear()
+        await button_pressed_evt.wait()
+        button_pressed_evt.clear()
+
         led.set_waiting_for_wake(True)
-        print(f"Waiting for wake keyword: '{cfg.WAKE_KEYWORD}'")
+        print(f"Button pressed. Say wake keyword: '{cfg.WAKE_KEYWORD}'")
         await _wait_for_wake_keyword(vosk_model, cfg.WAKE_KEYWORD)
-
         led.set_waiting_for_wake(False)
-        print("Wake keyword detected. Listening for message...")
 
-        released_evt.clear()
-        pressed_evt.set()
-        await released_evt.wait()
+        print("Wake keyword detected. Listening for prompt...")
+        state.phase = "initial"
 
-        # Give Gemini loop a brief moment to finish turn transition.
-        await asyncio.sleep(0.35)
+        while True:
+            released_evt.clear()
+            state.response_done_evt.clear()
+            pressed_evt.set()
+
+            await released_evt.wait()
+            await state.response_done_evt.wait()
+
+            if not state.last_turn_had_speech:
+                print("No speech detected. Returning to button wait.")
+                break
+            if not state.last_response_had_audio:
+                print("No audio response received. Returning to button wait.")
+                break
+
+            state.phase = "followup"
+            await asyncio.sleep(0.15)
+            print(
+                "Listening for follow-up..."
+                f" (timeout {cfg.BUTTON_WAKE_FOLLOWUP_LISTEN_SECONDS:.1f}s)"
+            )
 
 
 async def main():
-    print("Starting initialization (wake-word mode)...")
+    print("Starting initialization (button + wake-word mode)...")
 
     if Model is None or KaldiRecognizer is None:
         print(
@@ -190,30 +232,64 @@ async def main():
         sys.exit(2)
 
     vosk_model = Model(str(model_path))
-
     led = LedController(cfg.LED_GPIO)
+
+    loop = asyncio.get_running_loop()
+    button_pressed_evt = asyncio.Event()
     pressed_evt = asyncio.Event()
     released_evt = asyncio.Event()
+    state = ConversationState()
+
+    def _turn_config_provider():
+        max_record = (
+            cfg.WAKE_MAX_RECORD_SECONDS
+            if state.phase == "initial"
+            else cfg.BUTTON_WAKE_FOLLOWUP_LISTEN_SECONDS
+        )
+        return TurnConfig(
+            auto_stop_on_silence=True,
+            silence_timeout_seconds=cfg.WAKE_SILENCE_TIMEOUT_SECONDS,
+            speech_rms_threshold=cfg.WAKE_SPEECH_RMS_THRESHOLD,
+            max_record_seconds=max_record,
+        )
+
+    async def _on_turn_recorded(had_speech: bool):
+        state.last_turn_had_speech = had_speech
+
+    async def _on_response_finished(had_audio: bool):
+        state.last_response_had_audio = had_audio
+        state.response_done_evt.set()
+
+    btn = Button(cfg.BTN_GPIO, pull_up=True, bounce_time=cfg.BTN_BOUNCE_SEC)
+    _bind_button_press(btn, loop, button_pressed_evt)
 
     gemini_task = asyncio.create_task(
         run_gemini_session(
             pressed_evt=pressed_evt,
             released_evt=released_evt,
             set_led_mode=led.set,
-            auto_stop_on_silence=True,
-            silence_timeout_seconds=cfg.WAKE_SILENCE_TIMEOUT_SECONDS,
-            speech_rms_threshold=cfg.WAKE_SPEECH_RMS_THRESHOLD,
-            max_record_seconds=cfg.WAKE_MAX_RECORD_SECONDS,
-            ready_hint="Say the wake keyword to start recording. Ctrl+C to exit.",
+            turn_config_provider=_turn_config_provider,
+            on_turn_recorded=_on_turn_recorded,
+            on_response_finished=_on_response_finished,
+            ready_hint="Press button, say wake keyword, then speak. Ctrl+C to exit.",
         )
     )
-    wake_task = asyncio.create_task(_wake_loop(pressed_evt, released_evt, led, vosk_model))
+    controller_task = asyncio.create_task(
+        _controller_loop(
+            button_pressed_evt=button_pressed_evt,
+            pressed_evt=pressed_evt,
+            released_evt=released_evt,
+            led=led,
+            vosk_model=vosk_model,
+            state=state,
+        )
+    )
 
     try:
-        await asyncio.gather(gemini_task, wake_task)
+        await asyncio.gather(gemini_task, controller_task)
     finally:
         gemini_task.cancel()
-        wake_task.cancel()
+        controller_task.cancel()
 
 
 if __name__ == "__main__":

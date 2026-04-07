@@ -89,7 +89,12 @@ async def main():
     released_evt = asyncio.Event()
     btn = Button(cfg.BTN_GPIO, pull_up=True, bounce_time=cfg.BTN_BOUNCE_SEC)
     bind_button_events(btn, loop, pressed_evt, released_evt)
-    await run_gemini_session(pressed_evt=pressed_evt, released_evt=released_evt, set_led_mode=led.set)
+    await run_gemini_session(
+        pressed_evt=pressed_evt,
+        released_evt=released_evt,
+        set_led_mode=led.set,
+        ready_hint="Hold the button to record (PTT). Ctrl+C to exit.",
+    )
 
 
 if __name__ == "__main__":
